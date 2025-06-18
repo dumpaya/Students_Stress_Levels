@@ -16,9 +16,9 @@ from sklearn.preprocessing import label_binarize
 # ===========================
 @st.cache_resource
 def load_model_and_scaler():
-    with open("stacking_classifier_model.pkl", "rb") as f:
+    with open("stacking_classifier_model(2).pkl", "rb") as f:
         model = pickle.load(f)
-    with open("scaler.pkl", "rb") as f:
+    with open("scaler(2).pkl", "rb") as f:
         scaler = pickle.load(f)
     return model, scaler
 
