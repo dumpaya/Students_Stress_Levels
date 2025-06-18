@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
+import os # Import the os module for path handling
 
 from sklearn.metrics import (
     accuracy_score, confusion_matrix, ConfusionMatrixDisplay,
@@ -18,20 +19,29 @@ from sklearn.preprocessing import label_binarize
 def load_model_and_scaler():
     """
     Loads the pre-trained stacking classifier model and the RobustScaler.
-    These files are expected to be in the same directory as the Streamlit app.
+    These files are expected to be in the 'models' directory.
     """
+    model_dir = "models"
+    model_path = os.path.join(model_dir, "stacking_classifier_model.pkl")
+    scaler_path = os.path.join(model_dir, "scaler.pkl")
+
     try:
-        # Corrected file names to remove '(2)' based on common naming convention
-        with open("stacking_classifier_model.pkl", "rb") as f:
+        # Check if the 'models' directory exists, if not, create it
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+            st.warning(f"Directory '{model_dir}' created. Please ensure your .pkl files are placed inside it.")
+            st.stop() # Stop execution if directory was just created, to allow user to place files
+
+        with open(model_path, "rb") as f:
             model = pickle.load(f)
-        with open("scaler.pkl", "rb") as f:
+        with open(scaler_path, "rb") as f:
             scaler = pickle.load(f)
         return model, scaler
     except FileNotFoundError:
-        st.error("Error: Model atau file scaler tidak ditemukan. Pastikan 'stacking_classifier_model.pkl' dan 'scaler.pkl' berada di direktori yang sama.")
+        st.error(f"Error: Model or scaler files not found. Please ensure 'stacking_classifier_model.pkl' and 'scaler.pkl' are in the '{model_dir}' directory.")
         st.stop()
     except Exception as e:
-        st.error(f"Error memuat model atau scaler: {e}")
+        st.error(f"Error loading model or scaler: {e}")
         st.stop()
 
 model, scaler = load_model_and_scaler()
@@ -46,6 +56,7 @@ def load_data():
     and encodes stress levels and academic performance.
     """
     try:
+        # Assuming the CSV is in the same directory as the app.py
         df = pd.read_csv("student_lifestyle_dataset.csv")
         stress_mapping = {'Low': 0, 'Moderate': 1, 'High': 2}
         performance_mapping = {'Poor': 0, 'Fair': 1, 'Good': 2, 'Excellent': 3}
@@ -58,15 +69,15 @@ def load_data():
         
         return df
     except FileNotFoundError:
-        st.error("Error: File dataset 'student_lifestyle_dataset.csv' tidak ditemukan. Pastikan file tersebut berada di direktori yang sama.")
+        st.error("Error: Dataset file 'student_lifestyle_dataset.csv' not found. Please ensure it's in the same directory as the Streamlit app.")
         st.stop()
     except Exception as e:
-        st.error(f"Error memuat data: {e}")
+        st.error(f"Error loading data: {e}")
         st.stop()
 
 data = load_data()
 
-# Define the features used for the model
+# Define the features used for the model - Ensure this order matches your model training
 features = [
     "Study_Hours_Per_Day", "Sleep_Hours_Per_Day", "Physical_Activity_Hours_Per_Day",
     "Social_Hours_Per_Day", "Extracurricular_Hours_Per_Day", "GPA", "Academic_Performance_Encoded"
@@ -208,23 +219,31 @@ elif page == "Evaluasi Model":
     """)
 
     # Prepare data for evaluation
-    X = data[features]
+    X = data[features].copy() # Use .copy() to avoid SettingWithCopyWarning
     y = data['Stress_Level_Encoded']
 
-    # Check if scaler has been fitted before trying to access feature_names_in_
+    # Ensure X has the same column names and order as expected by the scaler
+    # The scaler.feature_names_in_ attribute stores the feature names seen during fit.
     if hasattr(scaler, 'feature_names_in_') and scaler.feature_names_in_ is not None:
-        X = pd.DataFrame(X, columns=scaler.feature_names_in_)
+        # Reorder columns of X to match scaler's expected order
+        try:
+            X = X[scaler.feature_names_in_]
+        except KeyError as e:
+            st.error(f"Error: Column mismatch between data and scaler's fitted features. Missing column: {e}. Please ensure your dataset contains all features used during model training and scaling.")
+            st.stop()
     else:
-        st.warning("Scaler belum di-fit. Melanjutkan dengan penskalaan langsung. Jika ini menyebabkan masalah, pastikan 'scaler.pkl' Anda di-fit dengan benar.")
-        # If scaler wasn't fitted, X is already a DataFrame, no need to recreate
-        pass 
+        st.warning("Scaler does not have 'feature_names_in_'. Proceeding with direct scaling. Ensure column order of input data matches training data.")
+        # If the scaler doesn't have feature_names_in_, it means it was loaded
+        # from a .pkl file that was not properly fitted to retain this attribute.
+        # In this case, we trust that 'features' list correctly represents the order.
+        pass # X is already a DataFrame with 'features' columns in the correct order
 
     try:
         X_scaled = scaler.transform(X)
         y_pred = model.predict(X_scaled)
         y_pred_proba = model.predict_proba(X_scaled)
     except Exception as e:
-        st.error(f"Error selama evaluasi model: {e}. Periksa apakah scaler dan model kompatibel dengan data.")
+        st.error(f"Error during model evaluation: {e}. Please check if the scaler and model are compatible with the data.")
         st.stop()
     
     # Mapping for display
@@ -245,8 +264,9 @@ elif page == "Evaluasi Model":
     st.pyplot(fig_cm)
 
     st.subheader("🧾 Laporan Klasifikasi")
-    report = classification_report(y_true_labels, y_pred_labels, target_names=['Low', 'Moderate', 'High'])
-    st.text(report)
+    report = classification_report(y, y_pred, target_names=['Low', 'Moderate', 'High'], output_dict=True)
+    st.dataframe(pd.DataFrame(report).T)
+
 
     st.subheader("📉 Kurva ROC dan AUC")
     n_classes = len(reverse_stress_mapping)
@@ -256,24 +276,75 @@ elif page == "Evaluasi Model":
     fpr = dict()
     tpr = dict()
     roc_auc = dict()
-    for i in range(n_classes):
-        fpr[i], tpr[i], _ = roc_curve(y_binarize[:, i], y_pred_proba[:, i])
-        roc_auc[i] = auc(fpr[i], tpr[i])
+    
+    # Ensure y_pred_proba has the correct number of columns (n_classes)
+    if y_pred_proba.shape[1] != n_classes:
+        st.warning("y_pred_proba has an unexpected number of columns for ROC curve plotting. Skipping ROC plot.")
+    else:
+        fig_roc, ax_roc = plt.subplots(figsize=(10, 8))
+        colors = ['blue', 'orange', 'green']
+        for i, color in zip(range(n_classes), colors):
+            fpr[i], tpr[i], _ = roc_curve(y_binarize[:, i], y_pred_proba[:, i])
+            roc_auc[i] = auc(fpr[i], tpr[i])
+            ax_roc.plot(fpr[i], tpr[i], color=color, lw=2,
+                     label=f'Kelas {reverse_stress_mapping[i]} (AUC = {roc_auc[i]:.2f})')
+        ax_roc.plot([0, 1], [0, 1], 'k--', lw=2)
+        ax_roc.set_xlim([0.0, 1.0])
+        ax_roc.set_ylim([0.0, 1.05])
+        ax_roc.set_xlabel('Tingkat False Positive')
+        ax_roc.set_ylabel('Tingkat True Positive')
+        ax_roc.set_title('Kurva Receiver Operating Characteristic (ROC)')
+        ax_roc.legend(loc="lower right")
+        st.pyplot(fig_roc)
 
-    # Plot ROC curves
-    fig_roc, ax_roc = plt.subplots(figsize=(10, 8))
-    colors = ['blue', 'orange', 'green']
-    for i, color in zip(range(n_classes), colors):
-        ax_roc.plot(fpr[i], tpr[i], color=color, lw=2,
-                 label=f'Kelas {reverse_stress_mapping[i]} (AUC = {roc_auc[i]:.2f})')
-    ax_roc.plot([0, 1], [0, 1], 'k--', lw=2)
-    ax_roc.set_xlim([0.0, 1.0])
-    ax_roc.set_ylim([0.0, 1.05])
-    ax_roc.set_xlabel('Tingkat False Positive')
-    ax_roc.set_ylabel('Tingkat True Positive')
-    ax_roc.set_title('Kurva Receiver Operating Characteristic (ROC)')
-    ax_roc.legend(loc="lower right")
-    st.pyplot(fig_roc)
+    st.subheader("🧠 Ringkasan Hasil Pelatihan Model")
+    st.markdown("""
+    Model dilatih menggunakan pendekatan **Stacking Classifier**, yaitu menggabungkan beberapa algoritma dasar yang kuat dengan meta-learner.  
+    Berikut adalah detail proses pelatihan model:
+    
+    ---
+    
+    #### 🔢 Dataset:
+    - Jumlah data: **2.000 mahasiswa**
+    - Jumlah fitur: **8 kolom** (gabungan numerik dan kategorik)
+    - Fitur numerik termasuk: **Study, Sleep, GPA, dsb**
+    - Target: `Stress_Level` (Low, Moderate, High)
+    
+    ---
+    
+    #### 📊 Praproses:
+    - Konversi label target menjadi numerik:  
+      `Low = 0`, `Moderate = 1`, `High = 2`
+    - Normalisasi fitur numerik dengan **RobustScaler**
+    - Penyeimbangan kelas target menggunakan **SMOTE (Synthetic Minority Over-sampling Technique)** > Teknik ini efektif mengatasi dominasi label tertentu (misal `High`) agar model tidak bias.
+    
+    ---
+    
+    #### ⚙️ Arsitektur Model:
+    - **Base Learners**:
+        - Logistic Regression
+        - Decision Tree Classifier
+        - Random Forest Classifier
+        - Support Vector Machine (SVM)
+        - XGBoost Classifier
+    - **Meta-Learner**:
+        - Random Forest Classifier  
+          > Digunakan untuk menggabungkan hasil prediksi dari base learners.
+    
+    ---
+    
+    #### 📈 Evaluasi Training:
+    - **Akurasi Pelatihan**: 100%
+    - **Confusion Matrix**: Semua prediksi benar
+    - **ROC AUC Score**: 1.00 untuk semua kelas
+    - **Classification Report**:
+        - Precision: 1.00
+        - Recall: 1.00
+        - F1-score: 1.00
+    
+    > 💡 Performa sempurna di data pelatihan menunjukkan bahwa model **fit sangat baik**, namun perlu diuji lebih lanjut menggunakan data uji atau validasi silang untuk mengecek kemungkinan **overfitting**.
+    """)
+
 
 # ===========================
 # 6. Prediction
@@ -286,15 +357,15 @@ elif page == "Prediksi":
 
     # Input fields for user
     st.subheader("Masukkan Atribut Gaya Hidup dan Akademik:")
-    nama = st.text_input("Nama Anda:") # Moved from below for immediate input
-    umur = st.number_input("Umur Anda:", min_value=5, max_value=100, value=20) # Moved from below
+    nama = st.text_input("Nama Anda:")
+    umur = st.number_input("Umur Anda:", min_value=5, max_value=100, value=20)
 
     study_hours = st.slider("Jam Belajar Per Hari", 0.0, 10.0, 5.0)
     sleep_hours = st.slider("Jam Tidur Per Hari", 0.0, 10.0, 7.0)
     physical_activity = st.slider("Jam Aktivitas Fisik Per Hari", 0.0, 13.0, 2.0)
     social_hours = st.slider("Jam Interaksi Sosial Per Hari", 0.0, 6.0, 2.0)
     extracurricular_input = st.selectbox("Ikut Ekstrakurikuler?", ["Ya", "Tidak"])
-    extracurricular_hours = 1 if extracurricular_input == "Ya" else 0 # Corrected mapping
+    extracurricular_hours = 1 if extracurricular_input == "Ya" else 0
     gpa = st.slider("IPK", 0.0, 4.0, 3.0)
 
     # Encode Academic_Performance based on GPA for prediction
@@ -310,31 +381,30 @@ elif page == "Prediksi":
     
     academic_performance_encoded = encode_academic_performance(gpa)
 
-    # Create DataFrame for prediction
-    # Ensure column order matches 'features' list used for training
+    # Create DataFrame for prediction, ensuring column order matches 'features'
     input_data = pd.DataFrame([[
         study_hours, sleep_hours, physical_activity,
         social_hours, extracurricular_hours, gpa, academic_performance_encoded
-    ]], columns=features) # Use 'features' directly for columns
+    ]], columns=features) # Use 'features' directly as columns
 
     if st.button("Prediksi Tingkat Stres"):
         if nama.strip() == "":
             st.error("❌ Mohon isi nama terlebih dahulu sebelum melakukan prediksi.")
         else:
             try:
-                # Check if scaler has been fitted before trying to access feature_names_in_
+                # Ensure input_data columns match scaler's expected order
                 if hasattr(scaler, 'feature_names_in_') and scaler.feature_names_in_ is not None:
-                    # If scaler has feature_names_in_, ensure input_data columns match
-                    # This line is redundant if input_data is already created with 'features' list as columns.
-                    # It's safer to just transform if the column order is guaranteed to be correct from `features` list.
-                    # input_data = pd.DataFrame(input_data, columns=scaler.feature_names_in_)
-                    pass
+                    # Reorder input_data columns to match scaler's expected order
+                    # This step is crucial if the scaler.pkl was fitted on a DataFrame
+                    # and retains feature_names_in_
+                    input_data_ordered = input_data[scaler.feature_names_in_]
                 else:
-                    st.warning("Scaler belum di-fit. Melanjutkan dengan penskalaan langsung. Jika ini menyebabkan masalah, pastikan 'scaler.pkl' Anda di-fit dengan benar.")
-                    pass
-
+                    # If scaler doesn't have feature_names_in_, trust the 'features' list order
+                    input_data_ordered = input_data.copy()
+                    st.warning("Scaler does not have 'feature_names_in_'. Assuming the input feature order is correct.")
+                
                 # Scale the input data
-                input_scaled = scaler.transform(input_data) # input_data already has correct features, no need to slice `[features]` again.
+                input_scaled = scaler.transform(input_data_ordered)
                 
                 # Make prediction
                 prediction_encoded = model.predict(input_scaled)[0]
@@ -363,7 +433,6 @@ elif page == "Prediksi":
 
             except Exception as e:
                 st.error(f"Terjadi kesalahan saat melakukan prediksi: {e}")
-
 
 # ===========================
 # 7. Anggota Kelompok
