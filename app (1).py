@@ -237,7 +237,7 @@ elif page == "Evaluasi Model":
 
     st.subheader("🎯 Akurasi Model")
     accuracy = accuracy_score(y, y_pred)
-    st.write(f"Akurasi: {accuracy:.4f}")
+    st.write(f"Akurasi: {accuracy * 100:.2f}%")
 
     st.subheader("📊 Confusion Matrix")
     cm = confusion_matrix(y_true_labels, y_pred_labels, labels=['Low', 'Moderate', 'High'])
