@@ -17,20 +17,15 @@ from sklearn.preprocessing import label_binarize
 # ===========================
 @st.cache_resource
 def load_model_and_scaler():
-    """
-    Loads the pre-trained stacking classifier model and the RobustScaler.
-    These files are expected to be in the 'models' directory.
-    """
     model_dir = "models"
     model_path = os.path.join(model_dir, "stacking_classifier_model.pkl")
     scaler_path = os.path.join(model_dir, "scaler.pkl")
 
     try:
-        # Check if the 'models' directory exists, if not, create it
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
             st.warning(f"Directory '{model_dir}' created. Please ensure your .pkl files are placed inside it.")
-            st.stop() # Stop execution if directory was just created, to allow user to place files
+            st.stop()
 
         with open(model_path, "rb") as f:
             model = pickle.load(f)
@@ -46,17 +41,10 @@ def load_model_and_scaler():
 
 model, scaler = load_model_and_scaler()
 
-# ===========================
-# 2. Load Dataset
-# ===========================
 @st.cache_data
+
 def load_data():
-    """
-    Loads the student lifestyle dataset, performs GPA categorization,
-    and encodes stress levels and academic performance.
-    """
     try:
-        # Assuming the CSV is in the same directory as the app.py
         df = pd.read_csv("student_lifestyle_dataset.csv")
         stress_mapping = {'Low': 0, 'Moderate': 1, 'High': 2}
         performance_mapping = {'Poor': 0, 'Fair': 1, 'Good': 2, 'Excellent': 3}
@@ -66,7 +54,7 @@ def load_data():
         )
         df['Academic_Performance_Encoded'] = df['Academic_Performance'].map(performance_mapping)
         df['Stress_Level_Encoded'] = df['Stress_Level'].map(stress_mapping)
-        
+
         return df
     except FileNotFoundError:
         st.error("Error: Dataset file 'student_lifestyle_dataset.csv' not found. Please ensure it's in the same directory as the Streamlit app.")
@@ -77,7 +65,6 @@ def load_data():
 
 data = load_data()
 
-# Define the features used for the model - Ensure this order matches your model training
 features = [
     "Study_Hours_Per_Day", "Sleep_Hours_Per_Day", "Physical_Activity_Hours_Per_Day",
     "Social_Hours_Per_Day", "Extracurricular_Hours_Per_Day", "GPA", "Academic_Performance_Encoded"
