@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pickle
-import os # Import the os module for path handling
+import joblib
+import os
 
 from sklearn.metrics import (
     accuracy_score, confusion_matrix, ConfusionMatrixDisplay,
@@ -18,22 +18,20 @@ from sklearn.preprocessing import label_binarize
 @st.cache_resource
 def load_model_and_scaler():
     model_dir = "models"
-    model_path = os.path.join(model_dir, "stacking_classifier_model.pkl")
-    scaler_path = os.path.join(model_dir, "scaler.pkl")
+    model_path = os.path.join(model_dir, "stacking_classifier_model.joblib")
+    scaler_path = os.path.join(model_dir, "scaler.joblib")
 
     try:
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
-            st.warning(f"Directory '{model_dir}' created. Please ensure your .pkl files are placed inside it.")
+            st.warning(f"Directory '{model_dir}' created. Please place your model and scaler files inside.")
             st.stop()
 
-        with open(model_path, "rb") as f:
-            model = pickle.load(f)
-        with open(scaler_path, "rb") as f:
-            scaler = pickle.load(f)
+        model = joblib.load(model_path)
+        scaler = joblib.load(scaler_path)
         return model, scaler
     except FileNotFoundError:
-        st.error(f"Error: Model or scaler files not found. Please ensure 'stacking_classifier_model.pkl' and 'scaler.pkl' are in the '{model_dir}' directory.")
+        st.error(f"Error: Model or scaler files not found in '{model_dir}' directory.")
         st.stop()
     except Exception as e:
         st.error(f"Error loading model or scaler: {e}")
@@ -42,7 +40,6 @@ def load_model_and_scaler():
 model, scaler = load_model_and_scaler()
 
 @st.cache_data
-
 def load_data():
     try:
         df = pd.read_csv("student_lifestyle_dataset.csv")
